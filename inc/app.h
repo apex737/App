@@ -15,7 +15,8 @@
 typedef struct {
 	ADC_HandleTypeDef* hadc;
 	UART_HandleTypeDef* huart;
-	TIM_HandleTypeDef* htim;
+	TIM_HandleTypeDef* htim_trgo;
+	TIM_HandleTypeDef* htim_os;
 } app_handle_t;
 
 void app_init(app_handle_t* pApp);

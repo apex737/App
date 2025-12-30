@@ -17,6 +17,8 @@
 #define SAMPLE_RATE   50000.0f        // 샘플링 레이트 (Hz)
 #define MIC_DISTANCE  0.15f           // 마이크 간격 (미터)
 #define SOUND_SPEED   343.0f          // 음속 (m/s)
+#define BPF_F_LOW   1000.0f   // Hz
+#define BPF_F_HIGH  6000.0f   // Hz
 
 // 구조체
 typedef struct {

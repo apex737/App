@@ -20,7 +20,7 @@ extern Buffer_Status_t buf_status;
 
 void app_init(app_handle_t* pApp)
 {
-	adc_init(pApp->hadc, pApp->htim);
+	adc_init(pApp->hadc, pApp->htim_trgo, pApp->htim_os);
 	tdoa_init();
 //	uart_init(pApp->huart);
 }
@@ -70,7 +70,6 @@ void app_main(void)
 		   case UART:
 //			   transmit_angle();
 			   cnt++;
-			   adc_awd_enable();
 //			   buf_status.awd_triggered = false;
 			   c_state = LISTEN;
 			   break;

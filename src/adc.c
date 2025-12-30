@@ -20,14 +20,22 @@ uint16_t mic2_buf[SAMPLES_PER_CH];
 // [안전장치 2] 상태 플래그
 Buffer_Status_t buf_status = {0};
 ADC_HandleTypeDef* pMyAdcHandle;
-TIM_HandleTypeDef* pMyTimHandle;
+TIM_HandleTypeDef* pTrgoTimHandle;
+TIM_HandleTypeDef* pOsTimHandle;
 
-void adc_init(ADC_HandleTypeDef* pAdcHandle, TIM_HandleTypeDef* pTimHandle)
+static volatile bool debouncing = false;
+void adc_init
+(
+	ADC_HandleTypeDef* pAdcHandle,
+	TIM_HandleTypeDef* pTim1,
+	TIM_HandleTypeDef* pTim2
+)
 {
 	pMyAdcHandle = pAdcHandle;
-	pMyTimHandle = pTimHandle;
+	pTrgoTimHandle = pTim1;
+	pOsTimHandle = pTim2;
 	HAL_ADC_Start_DMA(pMyAdcHandle, (uint32_t *)adc_dma_buf, DOUBLE_BUF_SIZE);
-	HAL_TIM_Base_Start(pMyTimHandle);
+	HAL_TIM_Base_Start(pTrgoTimHandle);
 }
 
 void split_adc_data(uint16_t offset)
@@ -69,19 +77,35 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 // [수정] 콜백 함수
 void HAL_ADC_LevelOutOfWindowCallback(ADC_HandleTypeDef* hadc)
 {
-    if(hadc->Instance == pMyAdcHandle->Instance)
-    {
-        // 1. 플래그 세우기
-        buf_status.awd_triggered = true;
+    if (hadc->Instance != pMyAdcHandle->Instance)
+        return;
 
-        // 2. [핵심] 시끄러우니까 AWD 인터럽트 끄기! (Disable IT)
-        // 이제 2200을 넘어도 인터럽트 안 걸림
-        __HAL_ADC_DISABLE_IT(hadc, ADC_IT_AWD);
+    if (debouncing)
+        return;                     // 이미 홀드오프 중이면 무시
+
+    buf_status.awd_triggered = true;
+
+    __HAL_ADC_DISABLE_IT(hadc, ADC_IT_AWD);  // AWD 차단
+
+    debouncing = true;
+
+    __HAL_TIM_SET_COUNTER(pOsTimHandle, 0);
+    HAL_TIM_Base_Start_IT(pOsTimHandle);   // one-shot 시작
+}
+
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim->Instance == pOsTimHandle->Instance)
+    {
+        HAL_TIM_Base_Stop_IT(pOsTimHandle);  // one-shot
+        debouncing = false;
+        adc_awd_enable();            // 여기서만 재무장
     }
 }
 
 
-// [추가] AWD를 다시 켜주는 함수 (Main에서 호출용)
+// [추가] AWD를 다시 켜주는 함수
 void adc_awd_enable(void)
 {
     // AWD 인터럽트 플래그를 먼저 지워야 안전함
@@ -89,7 +113,6 @@ void adc_awd_enable(void)
     // AWD 인터럽트 활성화
     __HAL_ADC_ENABLE_IT(pMyAdcHandle, ADC_IT_AWD);
 }
-
 
 
 

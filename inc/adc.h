@@ -29,7 +29,8 @@ typedef struct {
 extern uint16_t mic1_buf[];
 extern uint16_t mic2_buf[];
 
-void adc_init(ADC_HandleTypeDef* pAdcHandle, TIM_HandleTypeDef* pTimHandle);
+void adc_init(	ADC_HandleTypeDef* pAdcHandle,	TIM_HandleTypeDef* pTim1,
+	TIM_HandleTypeDef* pTim2);
 void split_adc_data(uint16_t offset);
 void adc_awd_enable(void);
 
