@@ -21,6 +21,8 @@
 #define BPF_F_LOW   1000.0f   // Hz
 #define BPF_F_HIGH  6000.0f   // Hz
 
+
+
 // 구조체
 typedef struct {
     arm_rfft_fast_instance_f32 fft_handler; // RFFT 핸들러
