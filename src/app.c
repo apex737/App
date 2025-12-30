@@ -9,6 +9,7 @@
 #include "app.h"
 
 // 전역 변수
+volatile float angle = 0.0;
 typedef enum {
 	LISTEN, WAIT_FOR_DATA, TDOA, UART
 } state_t;
@@ -20,6 +21,7 @@ extern Buffer_Status_t buf_status;
 void app_init(app_handle_t* pApp)
 {
 	adc_init(pApp->hadc, pApp->htim);
+	tdoa_init();
 //	uart_init(pApp->huart);
 }
 
@@ -60,8 +62,7 @@ void app_main(void)
 			   break;
 
 		   case TDOA:
-			   process_tdoa();
-			   delay(5);
+			   angle = tdoa_process(mic1_buf, mic2_buf);
 			   buf_status.tdoa_running = false;
 			   c_state = UART;
 			   break;

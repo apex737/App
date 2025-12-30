@@ -15,8 +15,8 @@
 
 static uint16_t adc_dma_buf[DOUBLE_BUF_SIZE]; // adc 0 ~ 4095
 // [안전장치 1] 연산 전용 버퍼를 따로 둡니다 (DMA가 건드리지 못하는 안전지대)
-uint16_t mic1_buf[SAMPLE_PER_CH];
-uint16_t mic2_buf[SAMPLE_PER_CH];
+uint16_t mic1_buf[SAMPLES_PER_CH];
+uint16_t mic2_buf[SAMPLES_PER_CH];
 // [안전장치 2] 상태 플래그
 Buffer_Status_t buf_status = {0};
 ADC_HandleTypeDef* pMyAdcHandle;
@@ -30,14 +30,6 @@ void adc_init(ADC_HandleTypeDef* pAdcHandle, TIM_HandleTypeDef* pTimHandle)
 	HAL_TIM_Base_Start(pMyTimHandle);
 }
 
-
-/* TO DO
- * DMA HT/TC recieve
- * NoC 배수만큼 버퍼 할당
- * NoC Stride로 값 쓰기
- *
- */
-
 void split_adc_data(uint16_t offset)
 {
 	if (buf_status.tdoa_running == true)
@@ -47,8 +39,9 @@ void split_adc_data(uint16_t offset)
 		buf_status.tdoa_overrun_err = true;
 		return;
 	}
-	for(uint32_t i = 0, j = 0; i < SAMPLE_PER_CH; i+=2, j++)
+	for(uint32_t j = 0; j < SAMPLES_PER_CH; j++)
 	{
+		uint32_t i = j*2;
 		mic1_buf[j] = adc_dma_buf[offset + i];
 		mic2_buf[j] = adc_dma_buf[offset + i + 1];
 	}
