@@ -18,8 +18,9 @@
 #define MIC_DISTANCE  0.15f           // 마이크 간격 (미터)
 #define SOUND_SPEED   343.0f          // 음속 (m/s)
 
-#define BPF_F_LOW   1000.0f   // Hz
-#define BPF_F_HIGH  6000.0f   // Hz
+// 15cm 마이크 간격 최적화 세팅
+#define BPF_F_LOW   150.0f   // 의미 있는 신호 확보
+#define BPF_F_HIGH  950.0f   // 앨리어싱 한계(1133Hz)보다 안전하게 낮게 설정
 
 
 
