@@ -9,14 +9,7 @@
 
 static TDOA_Context_t tdoa_ctx;
 
-/* =========================
- *  튜닝 파라미터
- * ========================= */
-#define PEAK_RATIO_THRESH   1.3f     // 부호 변경 허용 최소 ratio (1.1~1.3)
-#define PEAK_ABS_MIN        1e-3f    // 너무 약한 상관 peak 무시
-
-/* 이전 프레임 lag 저장 (부호 안정화용) */
-static int prev_shift_lag = 0;
+static float prev_arg;
 
 /* =========================
  *  Init
@@ -24,6 +17,7 @@ static int prev_shift_lag = 0;
 void tdoa_init(void)
 {
     arm_rfft_fast_init_f32(&tdoa_ctx.fft_handler, FFT_SIZE);
+    prev_arg = 0.0f;
 }
 
 /* =========================
@@ -155,24 +149,24 @@ static int find_peak_lag_limited(const float* corr,
     return best_lag;
 }
 
-static void find_pos_neg_peaks(const float* corr,
-                               uint32_t N,
-                               int max_lag,
-                               float* pos_peak,
-                               float* neg_peak)
-{
-    float p_pos = -1e30f;
-    float p_neg = -1e30f;
-
-    for (int lag = 0; lag <= max_lag; lag++)
-        if (corr[lag] > p_pos) p_pos = corr[lag];
-
-    for (int i = (int)N - max_lag; i < (int)N; i++)
-        if (corr[i] > p_neg) p_neg = corr[i];
-
-    *pos_peak = p_pos;
-    *neg_peak = p_neg;
-}
+//static void find_pos_neg_peaks(const float* corr,
+//                               uint32_t N,
+//                               int max_lag,
+//                               float* pos_peak,
+//                               float* neg_peak)
+//{
+//    float p_pos = -1e30f;
+//    float p_neg = -1e30f;
+//
+//    for (int lag = 0; lag <= max_lag; lag++)
+//        if (corr[lag] > p_pos) p_pos = corr[lag];
+//
+//    for (int i = (int)N - max_lag; i < (int)N; i++)
+//        if (corr[i] > p_neg) p_neg = corr[i];
+//
+//    *pos_peak = p_pos;
+//    *neg_peak = p_neg;
+//}
 
 /* =========================
  *  Main TDOA
@@ -222,45 +216,18 @@ float tdoa_process(uint16_t* mic1, uint16_t* mic2)
     if (max_lag > (int)(FFT_SIZE / 2 - 1))
         max_lag = (int)(FFT_SIZE / 2 - 1);
 
-    /* 7) peak 탐색 */
-    float peak_val = 0.0f;
-    int raw_lag = find_peak_lag_limited(
-        tdoa_ctx.fft_in1, FFT_SIZE, max_lag, &peak_val);
+    /* 7) Peak Lag 탐색 */
+	float peak_val = 0.0f;
+	int raw_lag = find_peak_lag_limited(tdoa_ctx.fft_in1, FFT_SIZE, max_lag, &peak_val);
 
-    float pos_peak, neg_peak;
-    find_pos_neg_peaks(tdoa_ctx.fft_in1,
-                       FFT_SIZE,
-                       max_lag,
-                       &pos_peak,
-                       &neg_peak);
+	/* 8) Lag → Angle 변환 */
+	float time_delay = (float)raw_lag / SAMPLE_RATE;
+	float dist_diff  = time_delay * SOUND_SPEED;
 
-    /* 8) 부호 안정화 */
-    float ratio = (pos_peak > neg_peak)
-                  ? (pos_peak / (neg_peak + 1e-9f))
-                  : (neg_peak / (pos_peak + 1e-9f));
+	// 아크사인 도메인(-1 ~ 1) 체크
+	float argument = dist_diff / MIC_DISTANCE;
+	if (argument > 1.0f || argument < -1.0f)  argument = prev_arg;
+	prev_arg = argument;
 
-    int shift_lag = raw_lag;
-
-    if (fabsf(pos_peak) < PEAK_ABS_MIN ||
-        fabsf(neg_peak) < PEAK_ABS_MIN ||
-        ratio < PEAK_RATIO_THRESH)
-    {
-        if ((raw_lag > 0 && prev_shift_lag < 0) ||
-            (raw_lag < 0 && prev_shift_lag > 0))
-        {
-            shift_lag = prev_shift_lag;
-        }
-    }
-
-    prev_shift_lag = shift_lag;
-
-    /* 9) lag → angle */
-    float time_delay = (float)shift_lag / SAMPLE_RATE;
-    float dist_diff  = time_delay * SOUND_SPEED;
-
-    float argument = dist_diff / MIC_DISTANCE;
-    if (argument > 1.0f)  argument = 1.0f;
-    if (argument < -1.0f) argument = -1.0f;
-
-    return asinf(argument) * (180.0f / 3.1415926f);
+	return asinf(argument) * (180.0f / 3.1415926f);
 }
