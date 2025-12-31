@@ -15,12 +15,12 @@
 // 설정값
 #define FFT_SIZE      1024             // 입력 샘플 수 (반드시 2의 승수)
 #define SAMPLE_RATE   50000.0f        // 샘플링 레이트 (Hz)
-#define MIC_DISTANCE  0.15f           // 마이크 간격 (미터)
+#define MIC_DISTANCE  0.1f           // 마이크 간격 (미터)
 #define SOUND_SPEED   343.0f          // 음속 (m/s)
 
 // 15cm 마이크 간격 최적화 세팅
 #define BPF_F_LOW   150.0f   // 의미 있는 신호 확보
-#define BPF_F_HIGH  950.0f   // 앨리어싱 한계(1133Hz)보다 안전하게 낮게 설정
+#define BPF_F_HIGH  1500.0f   // 앨리어싱 한계(1715Hz)보다 안전하게 낮게 설정
 
 
 
