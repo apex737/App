@@ -2,8 +2,7 @@
  * uart.h
  *
  *  Created on: Dec 29, 2025
- *      Author: user
- */
+ *      Author: user */
 
 #ifndef APP_INC_UART_H_
 #define APP_INC_UART_H_
