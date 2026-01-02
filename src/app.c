@@ -62,7 +62,7 @@ void app_main(void)
 			   break;
 
 		   case TDOA:
-			   angle = tdoa_process(mic1_buf, mic2_buf);
+			   angle = tdoa_process_3mic(mic1_buf, mic2_buf, mic3_buf);
 			   buf_status.tdoa_running = false;
 			   c_state = UART;
 			   break;
