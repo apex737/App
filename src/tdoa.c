@@ -1,8 +1,5 @@
 /* =========================================================
  * tdoa.c  (3-MIC, 정삼각형 배치)
- * - 기존 2-MIC tdoa_process() 원형 유지
- * - 내부 코어를 재사용해 pairwise lag 함수 추가
- * - 3-MIC 래퍼에서 0~360° 산출
  * ========================================================= */
 
 #include "tdoa.h"
@@ -111,210 +108,105 @@ static void gcc_phat_rfft_packed(const float* X1,
     }
 }
 
+
+// 안전한 배열 접근을 위한 헬퍼
+static float get_val_safe(const float* arr, int idx, uint32_t N)
+{
+    if (idx < 0) idx += N;
+    else if (idx >= (int)N) idx -= N;
+    return arr[idx];
+}
+
 /* =========================
  *  Peak utilities
  * ========================= */
-static int find_peak_lag_limited(const float* corr,
-                                 uint32_t N,
-                                 int max_lag,
-                                 float* out_peak)
+static float find_peak_lag_subsample(const float* corr, uint32_t N, float* out_peak_val)
 {
-    float best = -1e30f;
-    int best_lag = 0;
+    float best_val = -1e30f;
+    int best_idx = 0;
+    int best_lag_int = 0;
 
-    /* +lag */
-    for (int lag = 0; lag <= max_lag; lag++)
-    {
+    // +lag
+    for (int lag = 0; lag <= MAX_LAG; lag++) {
         float v = corr[lag];
-        if (v > best)
-        {
-            best = v;
-            best_lag = lag;
-        }
+        if (v > best_val) { best_val = v; best_idx = lag; best_lag_int = lag; }
     }
-
-    /* -lag */
-    for (int i = (int)N - max_lag; i < (int)N; i++)
-    {
+    // -lag
+    for (int i = (int)N - MAX_LAG; i < (int)N; i++) {
         float v = corr[i];
-        int lag = i - (int)N;
-        if (v > best)
-        {
-            best = v;
-            best_lag = lag;
-        }
+        if (v > best_val) { best_val = v; best_idx = i; best_lag_int = i - (int)N; }
     }
 
-    if (out_peak) *out_peak = best;
-    return best_lag;
+    if (out_peak_val) *out_peak_val = best_val;
+
+    // 2차 보간
+    float y_curr  = best_val;
+    float y_left  = get_val_safe(corr, best_idx - 1, N);
+    float y_right = get_val_safe(corr, best_idx + 1, N);
+
+    float denominator = 2.0f * (y_left - 2.0f * y_curr + y_right);
+    float delta = 0.0f;
+
+    if (fabsf(denominator) > 1e-9f) delta = (y_left - y_right) / denominator;
+    if (delta > 0.5f) delta = 0.5f;
+    if (delta < -0.5f) delta = -0.5f;
+
+    return (float)best_lag_int + delta;
 }
 
-
-/* =========================
- *  Main TDOA
- * ========================= */
-float tdoa_process(uint16_t* mic1, uint16_t* mic2)
+static float tdoa_pair_lag(uint16_t* micA, uint16_t* micB)
 {
-    /* 1) DC 제거 */
-    remove_dc_offset(mic1, tdoa_ctx.fft_in1, FFT_SIZE);
-    remove_dc_offset(mic2, tdoa_ctx.fft_in2, FFT_SIZE);
-
-    /* 2) FFT */
-    arm_rfft_fast_f32(&tdoa_ctx.fft_handler,
-                      tdoa_ctx.fft_in1,
-                      tdoa_ctx.fft_out1, 0);
-
-    arm_rfft_fast_f32(&tdoa_ctx.fft_handler,
-                      tdoa_ctx.fft_in2,
-                      tdoa_ctx.fft_out2, 0);
-
-    /* 3) BPF */
-    apply_bpf_rfft_packed(tdoa_ctx.fft_out1,
-                          FFT_SIZE,
-                          SAMPLE_RATE,
-                          BPF_F_LOW,
-                          BPF_F_HIGH);
-
-    apply_bpf_rfft_packed(tdoa_ctx.fft_out2,
-                          FFT_SIZE,
-                          SAMPLE_RATE,
-                          BPF_F_LOW,
-                          BPF_F_HIGH);
-
-    /* 4) GCC-PHAT */
-    gcc_phat_rfft_packed(tdoa_ctx.fft_out1,
-                         tdoa_ctx.fft_out2,
-                         tdoa_ctx.phat_out,
-                         FFT_SIZE);
-
-    /* 5) IFFT → correlation */
-    arm_rfft_fast_f32(&tdoa_ctx.fft_handler,
-                      tdoa_ctx.phat_out,
-                      tdoa_ctx.fft_in1, 1);
-
-    /* 6) 물리적 lag 제한 */
-    int max_lag = (int)roundf((MIC_DISTANCE / SOUND_SPEED) * SAMPLE_RATE);
-    if (max_lag < 1) max_lag = 1;
-    if (max_lag > (int)(FFT_SIZE / 2 - 1))
-        max_lag = (int)(FFT_SIZE / 2 - 1);
-
-    /* 7) Peak Lag 탐색 */
-	float peak_val = 0.0f;
-	int raw_lag = find_peak_lag_limited(tdoa_ctx.fft_in1, FFT_SIZE, max_lag, &peak_val);
-
-	/* 8) Lag → Angle 변환 */
-	float time_delay = (float)raw_lag / SAMPLE_RATE;
-	float dist_diff  = time_delay * SOUND_SPEED;
-
-	// 아크사인 도메인(-1 ~ 1) 체크
-	float argument = dist_diff / MIC_DISTANCE;
-	if (argument > 1.0f || argument < -1.0f)  argument = prev_arg;
-	prev_arg = argument;
-
-	return asinf(argument) * (180.0f / 3.1415926f);
-}
-
-
-/* =========================
- *  Pairwise lag core (추가)
- *  - 2MIC tdoa_process()의 1~7단계를 그대로 재사용
- *  - 결과로 raw_lag 반환
- * ========================= */
-static int tdoa_pair_lag(uint16_t* micA, uint16_t* micB, float* out_peak)
-{
-    /* 1) DC 제거 */
+    // 1) DC 제거
     remove_dc_offset(micA, tdoa_ctx.fft_in1, FFT_SIZE);
     remove_dc_offset(micB, tdoa_ctx.fft_in2, FFT_SIZE);
 
-    /* 2) FFT */
-    arm_rfft_fast_f32(&tdoa_ctx.fft_handler,
-                      tdoa_ctx.fft_in1,
-                      tdoa_ctx.fft_out1, 0);
+    // 2) FFT
+    arm_rfft_fast_f32(&tdoa_ctx.fft_handler, tdoa_ctx.fft_in1, tdoa_ctx.fft_out1, 0);
+    arm_rfft_fast_f32(&tdoa_ctx.fft_handler, tdoa_ctx.fft_in2, tdoa_ctx.fft_out2, 0);
 
-    arm_rfft_fast_f32(&tdoa_ctx.fft_handler,
-                      tdoa_ctx.fft_in2,
-                      tdoa_ctx.fft_out2, 0);
+    // 3) BPF
+    apply_bpf_rfft_packed(tdoa_ctx.fft_out1, FFT_SIZE, SAMPLE_RATE, BPF_F_LOW, BPF_F_HIGH);
+    apply_bpf_rfft_packed(tdoa_ctx.fft_out2, FFT_SIZE, SAMPLE_RATE, BPF_F_LOW, BPF_F_HIGH);
 
-    /* 3) BPF */
-    apply_bpf_rfft_packed(tdoa_ctx.fft_out1,
-                          FFT_SIZE,
-                          SAMPLE_RATE,
-                          BPF_F_LOW,
-                          BPF_F_HIGH);
+    // 4) GCC-PHAT
+    gcc_phat_rfft_packed(tdoa_ctx.fft_out1, tdoa_ctx.fft_out2, tdoa_ctx.phat_out, FFT_SIZE);
 
-    apply_bpf_rfft_packed(tdoa_ctx.fft_out2,
-                          FFT_SIZE,
-                          SAMPLE_RATE,
-                          BPF_F_LOW,
-                          BPF_F_HIGH);
+    // 5) IFFT
+    arm_rfft_fast_f32(&tdoa_ctx.fft_handler, tdoa_ctx.phat_out, tdoa_ctx.fft_in1, 1);
 
-    /* 4) GCC-PHAT */
-    gcc_phat_rfft_packed(tdoa_ctx.fft_out1,
-                         tdoa_ctx.fft_out2,
-                         tdoa_ctx.phat_out,
-                         FFT_SIZE);
-
-    /* 5) IFFT → correlation */
-    arm_rfft_fast_f32(&tdoa_ctx.fft_handler,
-                      tdoa_ctx.phat_out,
-                      tdoa_ctx.fft_in1, 1);
-
-    /* 6) 물리적 lag 제한 (각 pair baseline을 MIC_DISTANCE로 가정) */
-    int max_lag = (int)roundf((MIC_DISTANCE / SOUND_SPEED) * SAMPLE_RATE);
-    if (max_lag < 1) max_lag = 1;
-    if (max_lag > (int)(FFT_SIZE / 2 - 1))
-        max_lag = (int)(FFT_SIZE / 2 - 1);
-
-    /* 7) Peak Lag 탐색 */
-    float peak_val = 0.0f;
-    int raw_lag = find_peak_lag_limited(tdoa_ctx.fft_in1, FFT_SIZE, max_lag, &peak_val);
-    if (out_peak) *out_peak = peak_val;
-    return raw_lag;
+    // 7) Sub-sample Peak Lag
+    return find_peak_lag_subsample(tdoa_ctx.fft_in1, FFT_SIZE, NULL);
 }
 
 /* =========================
- *  3-MIC (equilateral) → 0~360 deg
- *
- *  최소 변경 / 기본형:
- *  - τ12, τ13만 사용 (M1 기준)
- *  - 일관성 체크는 가볍게만(peak 기반 optional)
+ * 3-MIC Process (Least Squares Estimation 적용)
  * ========================= */
-/* =========================
- * 3-MIC (equilateral) → 0~360 deg
- * 개선된 로직: Far-Field 기하학 모델 사용
- * ========================= */
-float tdoa_process_3mic(uint16_t* mic1, uint16_t* mic2, uint16_t* mic3)
+// Far-Field 근사, 정삼각형 배치 최적화 수식
+float tdoa_process_3mic
+(uint16_t* mic1, uint16_t* mic2, uint16_t* mic3,
+        float* lagExp, float* err)
 {
-    /* 1) pairwise lag 계산 */
-    float p12 = 0.0f, p13 = 0.0f;
-    int lag12 = tdoa_pair_lag(mic1, mic2, &p12); // tdoa_ctx 재사용 문제 없음 (순차 실행)
-    int lag13 = tdoa_pair_lag(mic1, mic3, &p13);
+    // 1. 3개의 쌍(Pair)에 대해 Lag 계산
+    float lag12 = tdoa_pair_lag(mic1, mic2);
+    float lag13 = tdoa_pair_lag(mic1, mic3);
+    float lag23 = tdoa_pair_lag(mic2, mic3);
 
-    /* 2) lag → 거리차(미터) */
-    // d12 = r2 - r1 (mic1 기준, mic2가 더 멀면 양수)
-    float d12 = ((float)lag12 / SAMPLE_RATE) * SOUND_SPEED;
-    float d13 = ((float)lag13 / SAMPLE_RATE) * SOUND_SPEED;
+    // 2. 신뢰성 검증
+    *lagExp = lag13 - lag12;
+    *err = fabsf(lag23 - *lagExp);
 
-    /* 3) 물리적 한계 클램프 (안전장치) */
-    if (d12 >  MIC_DISTANCE) d12 =  MIC_DISTANCE;
-    if (d12 < -MIC_DISTANCE) d12 = -MIC_DISTANCE;
-    if (d13 >  MIC_DISTANCE) d13 =  MIC_DISTANCE;
-    if (d13 < -MIC_DISTANCE) d13 = -MIC_DISTANCE;
+    // 3. 거리 변환
+    float d12 = (lag12 / SAMPLE_RATE) * SOUND_SPEED;
+    float d13 = (lag13 / SAMPLE_RATE) * SOUND_SPEED;
+    float d23 = (lag23 / SAMPLE_RATE) * SOUND_SPEED;
 
-    /* 4) 각도 산출 (Far-Field Model)
-     * 정삼각형 배치 (Mic1:원점, Mic2:X축 위)에서:
-     * cos(theta) = -d12 / D
-     * sin(theta) = (d12 - 2*d13) / (D * sqrt(3))
-     *
-     * atan2를 쓸 때는 분모 D가 약분되므로 아래와 같이 간소화 가능
-     */
-    float x_vec = -d12;
-    float y_vec = (d12 - 2.0f * d13) / 1.7320508f; // sqrt(3)
+    // 4. LSE 정규 방정식; 3개의 데이터를 모두 사용하여 X, Y 성분을 추정
+    // 정삼각형에서 각 변에 투영된 성분을 평균
+    float ux = -(2.0f * d12 + d13 - d23) / (3.0f * MIC_DISTANCE);
+    float uy = -(d13 + d23) / (1.7320508f * MIC_DISTANCE); // 1.732... = sqrt(3)
 
-    /* 5) 0~360 deg 변환 */
-    float ang = atan2f(y_vec, x_vec) * (180.0f / 3.1415926f);
-
-    // atan2는 -180 ~ +180을 반환하므로 0~360으로 보정
+    // 5.각도 산출
+    float ang = atan2f(uy, ux) * (180.0f / 3.1415926f);
     if (ang < 0.0f) ang += 360.0f;
 
     return ang;

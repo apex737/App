@@ -9,7 +9,7 @@
 #include "app.h"
 
 // 전역 변수
-volatile float angle = 0.0;
+float lagExp = 0.0, err = 0.0, angle = 0.0;
 typedef enum {
 	LISTEN, WAIT_FOR_DATA, TDOA, UART
 } state_t;
@@ -62,7 +62,9 @@ void app_main(void)
 			   break;
 
 		   case TDOA:
-			   angle = tdoa_process_3mic(mic1_buf, mic2_buf, mic3_buf);
+			   angle = tdoa_process_3mic(mic1_buf, mic2_buf, mic3_buf,
+					   &lagExp, &err);
+
 			   buf_status.tdoa_running = false;
 			   c_state = UART;
 			   break;

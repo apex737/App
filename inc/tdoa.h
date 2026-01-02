@@ -17,10 +17,10 @@
 #define SAMPLE_RATE   50000.0f       // 샘플링 레이트 (Hz)
 #define MIC_DISTANCE  0.07f           // 마이크 간격 (미터)
 #define SOUND_SPEED   343.0f         // 음속 (m/s)
-
+#define MAX_LAG		  (int)((MIC_DISTANCE / SOUND_SPEED) * SAMPLE_RATE)
 // 15cm 마이크 간격 최적화 세팅
 #define BPF_F_LOW   150.0f   		// 의미 있는 신호 확보
-#define BPF_F_HIGH  1500.0f   		// 앨리어싱 한계(1715Hz)보다 안전하게 낮게 설정
+#define BPF_F_HIGH  2000.0f   		// 앨리어싱 한계(1715Hz)보다 안전하게 낮게 설정
 
 // 정삼각형 배치
 #define MIC1_X  (0.0f)
@@ -45,7 +45,8 @@ void tdoa_init(void);
 float tdoa_process(uint16_t* mic1, uint16_t* mic2);
 
 /* 3-MIC (추가) : 0~360 deg */
-float tdoa_process_3mic(uint16_t* mic1, uint16_t* mic2, uint16_t* mic3);
+float tdoa_process_3mic(uint16_t* mic1, uint16_t* mic2, uint16_t* mic3,
+		float* lagExp, float* err);
 
 
 #endif /* APP_INC_TDOA_H_ */
