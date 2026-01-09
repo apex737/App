@@ -5,4 +5,4 @@ https://www.youtube.com/watch?v=o7CY6T9-OOM
 <img src="desc/3-mic.jpg">
 
 <h2>구현 흐름</h2>
-<img src="desc/description.jpg">
+<img src="desc/desc.jpg">
